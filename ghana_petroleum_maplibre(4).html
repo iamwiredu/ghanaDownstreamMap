@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ghana Petroleum Downstream – Interactive Map</title>
+
+<!--
+  ============================================================
+  STACK: Leaflet.js + OpenStreetMap
+  ────────────────────────────────
+  Same concept as Navigatr: browser fetches tiles directly
+  from OSM — zero API key, zero cost, zero backend.
+
+  Leaflet is worker-free so it runs in any sandboxed iframe.
+  In production you'd use MapLibre (same tile URLs) for
+  vector tiles, 3D, and WebGL effects.
+  ============================================================
+-->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg:      #f0f4f8;
+    --surface: #ffffff;
+    --panel:   #fafbfd;
+    --border:  #d8e2ee;
+    --gold:    #b87000;
+    --red:     #c0202e;
+    --teal:    #0080a0;
+    --green:   #028a65;
+    --purple:  #6b21c8;
+    --white:   #141e2b;
+    --muted:   #6b7f96;
+    --amber:   #bf5200;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg); color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+    height: 100vh; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+
+  header {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 10px 18px; display: flex; align-items: center;
+    gap: 13px; flex-shrink: 0; height: 52px;
+  }
+  .hx {
+    width:32px; height:32px; background: var(--gold);
+    clip-path: polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);
+    flex-shrink: 0;
+  }
+  .ht h1 { font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:3px; color:var(--gold); }
+  .ht p  { font-size:9px; color:var(--muted); font-family:'IBM Plex Mono',monospace; letter-spacing:1px; }
+  .hbadge {
+    margin-left: auto;
+    background: rgba(240,165,0,.1); border: 1px solid rgba(240,165,0,.3);
+    padding: 3px 11px; font-family:'IBM Plex Mono',monospace;
+    font-size:9px; color:var(--gold); letter-spacing:1px; white-space:nowrap;
+  }
+
+  .main { display:flex; flex:1; overflow:hidden; }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    width: 268px; background: var(--panel);
+    border-right: 1px solid var(--border);
+    overflow-y: auto; flex-shrink: 0;
+  }
+  .sidebar::-webkit-scrollbar { width:3px; }
+  .sidebar::-webkit-scrollbar-thumb { background:var(--border); }
+  .ss { border-bottom:1px solid var(--border); padding:11px 13px; }
+  .st { font-family:'IBM Plex Mono',monospace; font-size:8px; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin-bottom:9px; }
+
+  .stats-grid { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+  .stat-box   { background:var(--bg); border:1px solid var(--border); padding:7px; text-align:center; }
+  .sn { font-family:'Bebas Neue',sans-serif; font-size:21px; color:var(--gold); line-height:1; }
+  .sl { font-size:8px; color:var(--muted); font-family:'IBM Plex Mono',monospace; margin-top:1px; }
+
+  .filters-wrap { display:flex; flex-wrap:wrap; gap:3px; }
+  .filter-btn {
+    display:inline-flex; align-items:center; gap:4px; padding:4px 8px;
+    border:1px solid var(--border); background:transparent;
+    color:var(--muted); font-size:9px; font-family:'IBM Plex Mono',monospace;
+    cursor:pointer; border-radius:2px; transition:all .15s;
+  }
+  .filter-btn:hover { border-color:var(--white); color:var(--white); }
+  .filter-btn.active { border-color:var(--gold); color:var(--gold); background:rgba(240,165,0,.08); }
+  .filter-btn .dot { width:5px; height:5px; border-radius:50%; flex-shrink:0; }
+
+  .legend-item { display:flex; align-items:center; gap:7px; padding:3px 0; }
+  .ld { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+  .legend-item span { font-size:10px; }
+  .lc { margin-left:auto; font-family:'IBM Plex Mono',monospace; font-size:9px; color:var(--muted); }
+
+  .fac-item {
+    padding:6px 8px; margin:1px -8px; cursor:pointer;
+    border-radius:3px; transition:background .12s; border-left:2px solid transparent;
+  }
+  .fac-item:hover { background:rgba(255,255,255,.03); }
+  .fac-item.active { background:rgba(240,165,0,.07); border-left-color:var(--gold); }
+  .fn { font-size:10px; font-weight:600; color:var(--white); margin-bottom:1px; }
+  .ft { font-size:8px; font-family:'IBM Plex Mono',monospace; color:var(--muted); }
+  .fdot { display:inline-block; width:5px; height:5px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+
+  /* ── MAP ── */
+  #map { flex:1; }
+
+  /* Subtle contrast boost for tiles on light background */
+  .leaflet-tile { filter: saturate(0.7) brightness(1.02) !important; }
+
+  /* ── LEAFLET OVERRIDES ── */
+  .leaflet-container { background: var(--bg) !important; }
+  .leaflet-control-zoom a {
+    background: var(--surface) !important; color: var(--muted) !important;
+    border-color: var(--border) !important;
+  }
+  .leaflet-control-zoom a:hover { color: var(--white) !important; background: var(--bg) !important; }
+  .leaflet-control-attribution { display:none; }
+
+  /* ── POPUP ── */
+  .leaflet-popup-content-wrapper {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 6px !important;
+    color: var(--white) !important;
+    box-shadow: 0 4px 24px rgba(0,0,0,.12) !important;
+    font-family: 'IBM Plex Sans', sans-serif !important;
+    padding: 0 !important;
+  }
+  .leaflet-popup-content { margin: 11px 14px !important; min-width: 200px; }
+  .leaflet-popup-tip { background: var(--surface) !important; box-shadow: 0 2px 4px rgba(0,0,0,.08) !important; }
+  .leaflet-popup-close-button { color: var(--muted) !important; font-size:16px !important; }
+
+  .pop-name   { font-weight:600; font-size:12px; margin-bottom:2px; }
+  .pop-type   { font-family:'IBM Plex Mono',monospace; font-size:8px; letter-spacing:1px; opacity:.55; margin-bottom:5px; }
+  .pop-detail { font-size:10px; color:var(--muted); line-height:1.5; }
+  .pop-badge  {
+    display:inline-block; padding:2px 6px; border-radius:2px;
+    font-size:8px; font-family:'IBM Plex Mono',monospace; margin-top:5px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hx"></div>
+  <div class="ht">
+    <h1>Ghana Petroleum Downstream Infrastructure</h1>
+    <p>LEAFLET.JS · OPENSTREETMAP · ZERO API KEY</p>
+  </div>
+  <div class="hbadge">GHA · REG.</div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="ss">
+      <div class="st">National Statistics</div>
+      <div class="stats-grid">
+        <div class="stat-box"><div class="sn">4</div><div class="sl">Refineries</div></div>
+        <div class="stat-box"><div class="sn">6</div><div class="sl">BOST Depots</div></div>
+        <div class="stat-box"><div class="sn">354<span style="font-size:11px">km</span></div><div class="sl">Pipelines</div></div>
+        <div class="stat-box"><div class="sn">12+</div><div class="sl">Major OMCs</div></div>
+      </div>
+    </div>
+
+    <div class="ss">
+      <div class="st">Filter by Category</div>
+      <div class="filters-wrap">
+        <button class="filter-btn active" data-cat="all"><span class="dot" style="background:#888"></span>All</button>
+        <button class="filter-btn" data-cat="refinery"><span class="dot" style="background:#e63946"></span>Refineries</button>
+        <button class="filter-btn" data-cat="depot"><span class="dot" style="background:#f0a500"></span>Depots</button>
+        <button class="filter-btn" data-cat="terminal"><span class="dot" style="background:#00b4d8"></span>Terminals</button>
+        <button class="filter-btn" data-cat="regulator"><span class="dot" style="background:#a855f7"></span>Regulators</button>
+        <button class="filter-btn" data-cat="omc"><span class="dot" style="background:#06d6a0"></span>OMCs</button>
+        <button class="filter-btn" data-cat="port"><span class="dot" style="background:#ff7b00"></span>Ports</button>
+      </div>
+    </div>
+
+    <div class="ss">
+      <div class="st">Legend</div>
+      <div class="legend-item"><div class="ld" style="background:#c0202e;box-shadow:0 0 4px #c0202e66"></div><span>Refinery</span><span class="lc">4</span></div>
+      <div class="legend-item"><div class="ld" style="background:#b87000;box-shadow:0 0 4px #b8700066"></div><span>BOST Storage Depot</span><span class="lc">6</span></div>
+      <div class="legend-item"><div class="ld" style="background:#0080a0;box-shadow:0 0 4px #0080a066"></div><span>Tank Farm / Terminal</span><span class="lc">20+</span></div>
+      <div class="legend-item"><div class="ld" style="background:#6b21c8;box-shadow:0 0 4px #6b21c866"></div><span>Regulator / SOE HQ</span><span class="lc">5</span></div>
+      <div class="legend-item"><div class="ld" style="background:#028a65;box-shadow:0 0 4px #028a6566"></div><span>OMC Headquarters</span><span class="lc">8</span></div>
+      <div class="legend-item"><div class="ld" style="background:#bf5200;box-shadow:0 0 4px #bf520066"></div><span>Port / Jetty</span><span class="lc">3</span></div>
+      <div style="margin-top:7px">
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:4px">
+          <svg width="32" height="5"><line x1="0" y1="2.5" x2="32" y2="2.5" stroke="#f0a500" stroke-width="1.5" stroke-dasharray="5,3"/></svg>
+          <span style="font-size:9px;color:var(--muted)">BOST Pipeline</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:7px">
+          <svg width="32" height="5"><line x1="0" y1="2.5" x2="32" y2="2.5" stroke="#00b4d8" stroke-width="1.2" stroke-dasharray="3,4" opacity=".6"/></svg>
+          <span style="font-size:9px;color:var(--muted)">Volta Barge Route</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="ss">
+      <div class="st">Facilities</div>
+      <div id="facList"></div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+</div>
+
+<script>
+// ── DATA ─────────────────────────────────────────────────────
+const CAT_COLORS = {
+  refinery:'#c0202e', depot:'#b87000', terminal:'#0080a0',
+  regulator:'#6b21c8', omc:'#028a65', port:'#bf5200'
+};
+
+const FACILITIES = [
+  {id:'tor',      name:'Tema Oil Refinery (TOR)',           cat:'refinery', lon:0.016,  lat:5.668,  tema:true,  detail:'Ghana\'s flagship refinery (est.1961). 45,000 bpd; undergoing restoration.',badge:'45,000 BPD · STATE',r:10},
+  {id:'sentuo',   name:'Sentuo Oil Refinery (SORL)',        cat:'refinery', lon:0.028,  lat:5.656,  tema:true,  detail:'Operational Jan 2024. 2M tonnes/year. Sino-Ghanaian PPP.',badge:'2M TPY · ACTIVE'},
+  {id:'platon',   name:'Platon Gas Oil Ghana',              cat:'refinery', lon:0.003,  lat:5.662,  tema:true,  detail:'1,800 bpd private refinery, Tema Heavy Industrial Area.',badge:'1,800 BPD · PRIVATE'},
+  {id:'akwaaba',  name:'Akwaaba Oil Refinery Ltd.',         cat:'refinery', lon:0.014,  lat:5.648,  tema:true,  detail:'4,000 bpd private refinery, Tema Industrial Area.',badge:'4,000 BPD · PRIVATE'},
+  {id:'bost-ap',  name:'BOST Accra Plains Depot',           cat:'depot',    lon:-0.040, lat:5.698,  tema:true,  detail:'Largest BOST depot, 210,500 m³. National strategic reserve.',badge:'210,500 M³ · LARGEST',r:10},
+  {id:'bost-mw',  name:'BOST Mami Water Depot',             cat:'depot',    lon:0.032,  lat:5.682,  tema:true,  detail:'Coastal BOST depot feeding the pipeline network northward.',badge:'TEMA COAST'},
+  {id:'bost-ako', name:'BOST Akosombo Depot',               cat:'depot',    lon:0.060,  lat:6.298,              detail:'Pipeline terminus; loads river barges for Volta Lake transport.',badge:'BARGE LOADING'},
+  {id:'bost-kum', name:'BOST Kumasi Depot',                 cat:'depot',    lon:-1.623, lat:6.688,              detail:'2nd largest BOST depot, 87,000 m³. Ashanti regional hub.',badge:'87,000 M³ · ASHANTI',r:10},
+  {id:'bost-bui', name:'BOST Buipe Depot',                  cat:'depot',    lon:-1.130, lat:8.284,              detail:'Receives Volta barges. Northern supply hub; pipeline to Bolgatanga.',badge:'NORTHERN HUB'},
+  {id:'bost-bol', name:'BOST Bolgatanga Depot',             cat:'depot',    lon:-0.851, lat:10.788,             detail:'46,500 m³, Upper East Region. Connected to Buipe via 261km pipeline.',badge:'46,500 M³ · UE',r:10},
+  {id:'tot',      name:'Tema Oil Terminal (TOT)',            cat:'terminal', lon:0.022,  lat:5.638,  tema:true,  detail:'Major liquid storage at Tema Port. Primary petroleum import/export.',badge:'IMPORT TERMINAL'},
+  {id:'tvi',      name:'Tema VI Liquids Terminal',          cat:'terminal', lon:0.033,  lat:5.628,  tema:true,  detail:'$380M facility, ~1.9 billion bbl capacity. Operational 2024.',badge:'1.9B BBL'},
+  {id:'flng',     name:'Tema FLNG Plant',                   cat:'terminal', lon:0.044,  lat:5.648,  tema:true,  detail:'$350M floating LNG, 83 Bcfe capacity. FSRU planned.',badge:'83 BCFE · PLANNED'},
+  {id:'tak-dep',  name:'Takoradi Oil Storage',              cat:'terminal', lon:-1.739, lat:4.897,              detail:'Western Region strategic storage. BOST + private operators.',badge:'WESTERN HUB',r:9},
+  {id:'npa',      name:'National Petroleum Authority',      cat:'regulator',lon:-0.195, lat:5.605,              detail:'NPA Act 2005. Regulates & supervises Ghana\'s downstream sector.',badge:'DOWNSTREAM REG.',r:9},
+  {id:'gnpc',     name:'GNPC Headquarters',                 cat:'regulator',lon:-0.183, lat:5.623,              detail:'State NOC est.1983. Exploration, production, crude supply.',badge:'STATE NOC'},
+  {id:'bost-hq',  name:'BOST HQ — South Legon',            cat:'regulator',lon:-0.168, lat:5.652,              detail:'Bulk Oil Storage & Transportation SOE. Manages pipelines & depots.',badge:'SOE · STORAGE'},
+  {id:'phdc',     name:'Petroleum Hub Dev. Corp.',          cat:'regulator',lon:-0.200, lat:5.612,              detail:'Est. 2020 (Act 1053). Oversees Ghana\'s integrated downstream hub.',badge:'PHDC SOE'},
+  {id:'goil',     name:'GOIL Company Ltd.',                 cat:'omc',      lon:-0.218, lat:5.558,              detail:'State-owned OMC. ~380 filling stations nationwide.',badge:'380 STATIONS',r:9},
+  {id:'total',    name:'TotalEnergies Ghana',               cat:'omc',      lon:-0.226, lat:5.572,              detail:'International OMC, ~260 stations across Ghana.',badge:'260 STATIONS'},
+  {id:'shell',    name:'Shell Ghana (Vivo Energy)',         cat:'omc',      lon:-0.210, lat:5.545,              detail:'Vivo Energy franchise across Ghana.',badge:'VIVO ENERGY'},
+  {id:'petrosol', name:'Petrosol Ghana Ltd.',               cat:'omc',      lon:-0.203, lat:5.567,              detail:'Prominent indigenous Ghanaian OMC.',badge:'LOCAL OMC'},
+  {id:'zen',      name:'ZEN Petroleum',                     cat:'omc',      lon:-0.214, lat:5.582,              detail:'Ghanaian petroleum marketing: bulk & retail.',badge:'LOCAL OMC'},
+  {id:'tema-port',name:'Tema Port',                         cat:'port',     lon:0.019,  lat:5.622,  tema:true,  detail:'Primary petroleum import gateway. Deep-water berths for crude & product tankers.',badge:'PRIMARY PORT',r:10},
+  {id:'tak-port', name:'Takoradi Port',                     cat:'port',     lon:-1.731, lat:4.887,              detail:'Western Region main port. Petroleum imports & Jubilee crude exports.',badge:'WESTERN PORT',r:10},
+  {id:'phdc-site',name:'PHDC Hub Site (Jomoro)',           cat:'regulator',lon:-2.890, lat:5.100,              detail:'Planned integrated petroleum hub in Jomoro, Western Region.',badge:'PLANNED HUB · JOMORO'},
+  {id:'cbm-tema', name:'Conventional Buoy Mooring (CBM)',  cat:'terminal', lon:0.075,  lat:5.595,              detail:'Offshore CBM (Trafigura). Connected by pipeline to BOST Accra Plains Depot.',badge:'OFFSHORE · CBM'},
+  {id:'ghanstock',name:'Ghanstock Depot',                  cat:'terminal', lon:-1.746, lat:4.917,              detail:'Bulk storage depot in the Sekondi-Takoradi industrial area.',badge:'WESTERN DEPOT'},
+];
+
+// Pipelines: Leaflet uses [lat, lon] arrays
+const PIPELINES = [
+  {type:'main',  pts:[[5.698,-0.040],[5.668,0.016],[5.682,0.032],[6.298,0.060]]},
+  {type:'barge', pts:[[6.298,0.060],[6.700,0.040],[7.200,0.000],[7.750,-0.200],[8.100,-0.600],[8.284,-1.130]]},
+  {type:'main',  pts:[[8.284,-1.130],[9.000,-1.000],[9.900,-0.930],[10.788,-0.851]]},
+];
+
+// ── MAP INIT ─────────────────────────────────────────────────
+const map = L.map('map', {
+  center: [7.9, -1.0],
+  zoom: 6
+});
+
+// OSM raster tiles — same free tile endpoints Navigatr uses
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  subdomains: ['a','b','c']
+}).addTo(map);
+
+// ── PIPELINES ────────────────────────────────────────────────
+PIPELINES.forEach(pl => {
+  const style = pl.type === 'main'
+    ? { color:'#f0a500', weight:2, opacity:0.8, dashArray:'8,5' }
+    : { color:'#00b4d8', weight:1.5, opacity:0.55, dashArray:'4,6' };
+  L.polyline(pl.pts, style).addTo(map);
+});
+
+// ── MARKERS ──────────────────────────────────────────────────
+let markerMap = {};   // id → { marker, facility }
+let activeFilter = 'all';
+
+function makeIcon(color, size) {
+  const s = size || 10;
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:${s}px;height:${s}px;border-radius:50%;
+      background:${color};
+      border:2px solid rgba(255,255,255,0.9);
+      box-shadow:0 0 0 1px ${color}55, 0 2px 8px rgba(0,0,0,0.2);
+      cursor:pointer;
+    "></div>`,
+    iconSize:   [s, s],
+    iconAnchor: [s/2, s/2],
+    popupAnchor:[0, -(s/2 + 4)]
+  });
+}
+
+function buildMarkers() {
+  // Clear existing markers
+  Object.values(markerMap).forEach(({ marker }) => map.removeLayer(marker));
+  markerMap = {};
+
+  const visible = activeFilter === 'all'
+    ? FACILITIES
+    : FACILITIES.filter(f => f.cat === activeFilter);
+
+  visible.forEach(f => {
+    const color = CAT_COLORS[f.cat];
+    const size  = f.r || 10;
+
+    const marker = L.marker([f.lat, f.lon], { icon: makeIcon(color, size) })
+      .addTo(map)
+      .bindPopup(`
+        <div class="pop-name">${f.name}</div>
+        <div class="pop-type">${f.cat.toUpperCase()}${f.tema ? ' · TEMA ENCLAVE' : ''}</div>
+        <div class="pop-detail">${f.detail}</div>
+        <span class="pop-badge" style="background:${color}22;color:${color};border:1px solid ${color}55">${f.badge || ''}</span>
+      `, { maxWidth: 255 });
+
+    marker.on('click', () => highlightSidebar(f.id));
+    markerMap[f.id] = { marker, facility: f };
+  });
+}
+
+// ── SIDEBAR ──────────────────────────────────────────────────
+function renderList() {
+  const items = activeFilter === 'all'
+    ? FACILITIES
+    : FACILITIES.filter(f => f.cat === activeFilter);
+
+  document.getElementById('facList').innerHTML = items.map(f => `
+    <div class="fac-item" data-id="${f.id}" onclick="flyTo('${f.id}')">
+      <div class="fn"><span class="fdot" style="background:${CAT_COLORS[f.cat]}"></span>${f.name}</div>
+      <div class="ft">${f.cat.toUpperCase()}${f.tema ? ' · TEMA ★' : ''}</div>
+    </div>
+  `).join('');
+}
+
+function highlightSidebar(id) {
+  document.querySelectorAll('.fac-item').forEach(el => el.classList.remove('active'));
+  const item = document.querySelector(`.fac-item[data-id="${id}"]`);
+  if (item) { item.classList.add('active'); item.scrollIntoView({ block:'nearest' }); }
+}
+
+function flyTo(id) {
+  const entry = markerMap[id];
+  if (!entry) return;
+  highlightSidebar(id);
+  map.flyTo([entry.facility.lat, entry.facility.lon], Math.max(map.getZoom(), 12), { duration: 1 });
+  setTimeout(() => entry.marker.openPopup(), 900);
+}
+
+// ── FILTERS ──────────────────────────────────────────────────
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeFilter = btn.dataset.cat;
+    map.closePopup();
+    buildMarkers();
+    renderList();
+  });
+});
+
+buildMarkers();
+renderList();
+</script>
+</body>
+</html>
